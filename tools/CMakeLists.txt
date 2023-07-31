@@ -1,0 +1,5 @@
+# add_subdirectory(soda-opt)
+# add_subdirectory(soda-translate)
+# add_subdirectory(mlir-runner)
+add_subdirectory(forward-opt)
+add_subdirectory(test-opt)
