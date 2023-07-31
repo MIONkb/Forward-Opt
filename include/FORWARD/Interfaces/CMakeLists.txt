@@ -1,0 +1,8 @@
+add_mlir_interface(InferenceInterface)
+# add_mlir_interface(GlobalGenInterface)
+# add_mlir_interface(FlopsInterface)
+# add_mlir_interface(LocalGenInterface)
+# add_mlir_interface(TypeInterface)
+# add_mlir_interface(ShapeInterface)
+# add_mlir_interface(DynLocalGenInterface)
+# add_mlir_interface(DynGlobalGenInterface)

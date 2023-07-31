@@ -1,0 +1,13 @@
+build/
+models/VIT/*.mlir
+models/VIT/*.npz
+# models/VIT_executed/*.mlir
+models/VIT_executed/*.npz
+models/simpl3/*.npz
+models/MyModel
+*.npz
+llvm-project-c11c2f5f6548a5303517c89ba6629bbfa7fae0d9/
+test/
+python-tpu-mlir/
+ggpython/
+.vscode
