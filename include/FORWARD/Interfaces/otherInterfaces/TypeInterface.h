@@ -45,4 +45,4 @@ mlir::Type type_verify_case_type(mlir::Operation *op, uint64_t opd_idx,
 
 } // namespace tpu_mlir
 /// Include the ODS generated interface header files.
-#include "tpu_mlir/Interfaces/TypeInterface.h.inc"
+#include "FORWARD/Interfaces/TypeInterface.h.inc"

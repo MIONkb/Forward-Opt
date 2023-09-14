@@ -46,6 +46,16 @@
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/ToolOutputFile.h"
 
+#include "FORWARD/Support/Dnnl/Dnnl.h"
+
+#include "cnpy.h"
+#include "FORWARD/Support/CaliMath/CaliMath.h"
+#include <iostream>
+#include <fstream>
+#include <iomanip>
+// #include <numpy/arrayobject.h>
+
+
 // Defined in the test directory, no public header.
 // namespace mlir {
 // void registerTestLoopPermutationPass();
@@ -78,14 +88,218 @@
 //   mlir::registerTestLoopPermutationPass();
 // }
 
+using namespace mlir;
+
+class ActInference{
+  public:
+    mlir::FORWARD::ModuleInterpreter* _module;
+    std::map<std::string, std::pair<std::shared_ptr<std::vector<float>>, int>> _ref_activations; //first:data; second:use count
+    std::map<std::string, std::tuple<float, float, float>> _activations_statistics; //first:min; second:max; third:abs
+  public:
+    ActInference(mlir::FORWARD::ModuleInterpreter* moduleInter);
+
+    std::map<std::string, float> activation_collect_and_calc_th();
+
+    void gen_ref_tensor(std::string opName);
+
+    std::shared_ptr<std::vector<float>> get_ref_tensor(std::string opName);
+
+    std::pair<std::vector<int>, float> histogram(std::shared_ptr<std::vector<float>> activation,
+                                      float abs_value, int histogram_bin_num = 2048);
+
+    std::map<std::string, float> find_threshold(std::map<std::string, std::vector<int>> histdataMap, 
+                                      std::map<std::string, float> histwidthMap, int histogram_bin_num = 2048);
+
+    void load_net_input();
+
+  public:
+    std::vector<std::string> getAllOpNames(){return _module->all_tensor_names;}
+};
+
+ActInference::ActInference(mlir::FORWARD::ModuleInterpreter* moduleInter){
+  _module = moduleInter;
+  _ref_activations.clear();
+}
+
+std::pair<std::vector<int>, float> ActInference::histogram(std::shared_ptr<std::vector<float>> activation,
+                                      float abs_value, int histogram_bin_num){
+  std::vector<float> absVec;
+  std::transform(activation->begin(), activation->end(), std::back_inserter(absVec), [](int num) {
+        return std::abs(num);
+  });
+  absVec.erase(std::remove(absVec.begin(), absVec.end(), 0), absVec.end());
+  float width = abs_value / (histogram_bin_num - 1);
+  std::vector<int> hist(histogram_bin_num, 0);
+  if(absVec.size() > 0){
+    for (const float& value : absVec) {
+        int bin = static_cast<int>(std::floor(value / width + 0.5));
+        if (bin >= 0 && bin < histogram_bin_num) {
+            hist[bin]++;
+        }
+    }
+  }
+  // if t.size > 0:
+  //     hist, _ = np.histogram(np.floor(t / width + 0.5),
+  //                             bins=bin_num,
+  //                             range=(0, bin_num - 1),
+  //                             density=False)
+  // else:
+  //     hist = np.zeros(bin_num)
+  // hist = hist.astype(np.int32)
+  // return hist, width
+  return std::make_pair(hist,width);
+}
+
+std::map<std::string, float> ActInference::find_threshold(std::map<std::string, std::vector<int>> histdataMap, 
+                std::map<std::string, float> histwidthMap, int histbinNum){
+  std::map<std::string, float> thresholds;
+  for(auto &iter : histdataMap){
+    std::string opname = iter.first;
+    std::vector<int> hist = iter.second;
+    llvm::errs() << "calculate op: " << opname << "\n";
+    float width = histwidthMap[opname];
+    int bin_num = histbinNum;
+    thresholds[opname] = CaliMath::kl_diversity_hist(&(hist[0]), width, bin_num);
+  }
+  return thresholds;
+}
+
+std::map<std::string, float> ActInference::activation_collect_and_calc_th(){
+  auto module = _module;
+  std::map<std::string, std::vector<int>> histogram_data_map;
+  std::map<std::string, float> histogram_width_map;
+  std::map<std::string, float> thresholds_map_absmax;
+  llvm::dbgs() << "[INFO] activation_collect_and_calc_th begin!!!!!" <<"\n";
+  std::vector<std::string> tensor_names = module->all_tensor_names;
+
+  // for(int i = 0; i < input_num; i++) //for cali images
+  for(auto name:tensor_names){
+    gen_ref_tensor(name);
+  
+    //define min/max
+    float min_value = std::numeric_limits<float>::infinity();
+    float max_value = -std::numeric_limits<float>::infinity();
+    float abs_value = 0;
+
+    auto activation = get_ref_tensor(name);
+    auto act_max = *(std::max_element(activation->begin(), activation->end()));
+    auto act_min = *(std::min_element(activation->begin(), activation->end()));
+    min_value = std::min(act_min, min_value);
+    max_value = std::max(act_max, max_value);
+    abs_value = std::max(abs(min_value), abs(max_value));
+    if(abs_value <= 1e-5){
+      // if op's outputs are all close to zero, change it to 1e-5 for them.
+      min_value = -1e-5;
+      max_value = 1e-5;
+      abs_value = 1e-5;
+      llvm::dbgs() << "[WARNING] layer " << "opname" << " is all zeros. Please check the input data correctness.\n";
+    }
+    _activations_statistics[name] = std::make_tuple(min_value, max_value, abs_value);
+    // abs_value = std::get<2>(_activations_statistics[name]);
+    auto histogramParam = histogram(activation, abs_value);
+    auto hist = histogramParam.first;
+    float width = histogramParam.second;
+    if(histogram_data_map.find(name) == histogram_data_map.end()){
+      histogram_data_map[name] = hist;
+      histogram_width_map[name] = width;
+    }else{
+      // histogram_data_map[name] += hist;
+      histogram_data_map[name].insert(histogram_data_map[name].end(), hist.begin(), hist.end());
+    }
+  }
+
+  auto thresholds_map = find_threshold(histogram_data_map, histogram_width_map);
+  for(auto &iter : _activations_statistics){
+    std::string opname = iter.first;
+    float abs_val = std::get<2>(iter.second);
+    thresholds_map_absmax[opname] = abs_val;
+    if(thresholds_map[opname] > abs_val){
+      thresholds_map[opname] = abs_val;
+    }
+  }
+  return thresholds_map;
+
+}
+
+
+void ActInference::gen_ref_tensor(std::string opName){
+  if(_ref_activations.find(opName) != _ref_activations.end()){
+    return;
+  }
+  llvm::errs() << "[INFO] generate reference tensor of " << opName << "\n";
+  Value curr_opValue = _module->value_map[opName];
+  curr_opValue.dump();
+  mlir::Operation *curr_op = curr_opValue.getDefiningOp();
+  auto prevOps = curr_op->getOperands();
+  auto weight_names = _module->all_weight_names;
+  for(auto prevOp:prevOps){
+    // prevOp.dump();
+    // std::string prevOpName = _module->name_map[&prevOp];
+    std::string prevOpName;
+    for(auto iter: _module->value_map){
+      if(iter.second == prevOp){
+        prevOpName = iter.first;
+        break;
+      }
+    }
+    if(std::find(weight_names.begin(), weight_names.end(), prevOpName) != weight_names.end()){
+      llvm::dbgs() << "[INFO] current previrous op " << prevOpName << " is constant\n";
+      continue;
+    }
+    llvm::dbgs() << "[INFO] current previrous op name: " << prevOpName <<"\n";
+    // std::shared_ptr<std::vector<float>> data = std::make_shared<std::vector<float>>();
+    auto data = _ref_activations[prevOpName].first;
+    // llvm::dbgs() << "before setTensor\n";
+    // llvm::dbgs() << "data size is: " << data->size() <<"\n";
+    _module->setTensor(prevOpName, data, data->size()* sizeof(float));
+  }
+
+  if(prevOps.size() > 0){
+    std::shared_ptr<std::vector<float>> value = _module->invoke_at(opName);
+    _ref_activations[opName] = std::make_pair(value, 7);
+  }
+}
+
+std::shared_ptr<std::vector<float>> ActInference::get_ref_tensor(std::string opName){
+  if(_ref_activations.find(opName) != _ref_activations.end()){
+    return _ref_activations[opName].first;
+  }else{
+    llvm::errs() << "error " << opName << " not in ref_activations\n";
+    return nullptr;
+  }
+}
+
+void ActInference::load_net_input(){
+  llvm::dbgs() << "[INFO] load_net_input begin\n";
+  // assert(_module->input_names.size() != 0);
+  for(std::string input : _module->input_names){
+    auto mem_map = _module->mem_map;
+    auto it = mem_map.find(input);
+    if (it == mem_map.end()) {
+      llvm::errs() << "Can't find op name: " << input << "\n";
+      llvm_unreachable("Error, setTensor failed");
+    }
+
+    auto act = it->second;
+    size_t size = act->size();
+    std::shared_ptr<std::vector<float>> data = std::make_shared<std::vector<float>>();
+    for(int i = 0; i < size; i++){
+      data->push_back(i);
+    }
+    llvm::dbgs() << "data size is: " << data->size() * sizeof(float) <<"\n";
+    _ref_activations[input] = std::make_pair(data, 7);
+  }
+  llvm::dbgs() << "[INFO] load_net_input end\n";
+}
+
 int main(int argc, char **argv) {
   // mlir::registerAllDialects();
   // mlir::registerAllPasses();
   using namespace mlir;
   std::unique_ptr<mlir::MLIRContext> context_;
   context_.reset();
-  OwningOpRef<ModuleOp> module_;
-  std::string filename = "/home/jhlou/forward-opt/models/visionLinear/tosa_elided.mlir";
+  OwningOpRef<ModuleOp> module_OOR;
+  std::string filename = "/home/xcgao/projects/forward-opt/models/visionLinear/tosa_elided.mlir";
   mlirEnableGlobalDebug(true);  
   llvm::DebugFlag = true;
     
@@ -96,127 +310,159 @@ int main(int argc, char **argv) {
                     tensor::TensorDialect, tosa::TosaDialect>();
   context_ = std::make_unique<MLIRContext>(registry);
 
-  module_ = parseSourceFile<mlir::ModuleOp>(filename, context_.get());
-  std::cout << "file:" << filename<< ", module: "<< module_.get() <<"\n";
-  module_.get().dump();
+  module_OOR = parseSourceFile<mlir::ModuleOp>(filename, context_.get());
+  mlir::ModuleOp module_ = module_OOR.get();
+  std::cout << "file:" << filename<< ", module: "<< module_OOR.get() <<"\n";
+  module_.dump();
+
+  mlir::FORWARD::ModuleInterpreter* interpreter_ = new mlir::FORWARD::ModuleInterpreter(module_);
+
+  interpreter_->printValuemap();
+
+  std::string weightFilePath_ = "/home/xcgao/projects/forward-opt/models/visionLinear/vit_origin_weight.npz";
+  if(weightFilePath_!=""){
+    interpreter_->weightnpz = weightFilePath_;
+    // cnpy::npz_t npzFile = cnpy::npz_load(weightFilePath_);
+    // for (const auto& pair : npzFile) {
+    //   const std::string& arrayName = pair.first;
+    //   const cnpy::NpyArray& array = pair.second;
+
+    //   // 输出数组名
+    //   std::cout << "Array name: " << arrayName << std::endl;
+
+    //   // 输出数组形状
+    //   std::cout << "Array shape: ";
+    //   for (size_t dim : array.shape) {
+    //       std::cout << dim << " ";
+    //   }
+    //   std::cout << std::endl;
+
+    //   // 输出数组数据
+    //   const float* data = array.data<float>();
+    //   for (size_t i = 0; i < array.num_vals; ++i) {
+    //       std::cout << data[i] << " ";
+    //   }
+    //   std::cout << std::endl;
+    // }
+    // interpreter_->setweightnpz(path);
+  }
+  interpreter_->allocate_resources();
+  
+  interpreter_->printValuemap();
+  // interpreter_->printMemmap();
+  
+  ActInference* infer = new ActInference(interpreter_);
+
+  infer->load_net_input();
 
   
-  // //===--------------------------------------------------------------------===//
-  // // Register mlir dialects and passes
-  // //===--------------------------------------------------------------------===//
-
-  // mlir::registerInlinerPass();
-  // mlir::registerCanonicalizerPass();
-  // mlir::registerCSEPass();
-
-  // registerLinalgPassesForSoda();
-  // registerAffinePassesForFORWARD();
-  // mlir::bufferization::registerPromoteBuffersToStackPass();
-
-  // mlir::registerConvertLinalgToStandardPass();
-  // // mlir::registerConvertLinalgToLLVMPass(); // This pass maps linalg to blas
-  // mlir::registerLinalgLowerToAffineLoopsPass();
-  // mlir::registerConvertFuncToLLVMPass();
-  // mlir::registerFinalizeMemRefToLLVMConversionPass();
-  // mlir::registerSCFToControlFlowPass();
-  // mlir::registerConvertAffineToStandardPass();
-  // mlir::registerConvertMathToLLVMPass();
-  // mlir::registerConvertMathToLibmPass();
-  // mlir::registerArithToLLVMConversionPass();
-  // mlir::arith::registerArithExpandOpsPass();
-  // mlir::memref::registerExpandOpsPass();
-  // mlir::memref::registerNormalizeMemRefsPass();
-  // mlir::registerReconcileUnrealizedCastsPass();
-
-  // Add the following to selectively include the necessary dialects. You only
-  // need to register dialects that will be *parsed* by the tool, not the one
-  // generated
-  // clang-format off
-  // registry.insert<mlir::func::FuncDialect,
-  //                 mlir::memref::MemRefDialect,
-  //                 mlir::LLVM::LLVMDialect,
-  //                 mlir::linalg::LinalgDialect,
-  //                 mlir::math::MathDialect,
-  //                 mlir::scf::SCFDialect,
-  //                 mlir::cf::ControlFlowDialect,
-  //                 mlir::vector::VectorDialect,
-  //                 mlir::arith::ArithDialect,
-  //                 mlir::affine::AffineDialect,
-  //                 mlir::ml_program::MLProgramDialect,
-  //                 mlir::tensor::TensorDialect,
-  //                 mlir::FORWARD::FORWARDDialect,
-  //                 mlir::tosa::TosaDialect>();
-  // clang-format on
-  // mlir::registerAllDialects(registry);
-
-  //===--------------------------------------------------------------------===//
-  // Register SODA dialects and passes
-  //===--------------------------------------------------------------------===//
-
-  // Dialects
-  // registry.insert<mlir::soda::SODADialect>();
-  // registry.insert<mlir::snn::SNNDialect>();
-  // registry.insert<mlir::mytest::MyTestDialect>();
-  // registry.insert<mlir::FDRA::FDRADialect>();
-  // registry.insert<mlir::ComplexOP::ComplexOPDialect>();
-
-  // ----- My Dialect -----
-  // mlir::mytest::registerGetMACPass();
-  // mlir::FDRA::registerFDRALoopCdfgGenPass();
-  // mlir::FDRA::registerExtractAffineForToKernelPass();
-  // mlir::FDRA::registerAdjustKernelMemoryFootprintPass();
-  // mlir::FDRA::registerExtractKernelToFuncPass();
-  // mlir::FDRA::registerAutoDesignSpaceExplorePass();
-  // mlir::FORWARD::registerTestPrintOpNestingPass();
-  // mlir::FDRA::registerConvertKernelCallToLLVMPass();
-  // mlir::FDRA::registerHoistLoadStoreInLoopNestPass();
-
-  // mlir::registerSCFForLoopCanonicalizationPass();
+  // llvm::errs() << "mem_map[input_0]: ";
+  // for(int i = 0; i < 768; i++){
+  //   llvm::errs() << infer->_module->mem_map["input_0"]->at(i) << " ";
+  // }
   
-  // ----- SODA -----
-  // Misc passes
-  // mlir::soda::registerTestPrintOpNestingPass();
-  // mlir::soda::registerTestArgumentsToXMLPass();
-  // mlir::soda::registerEraseMemrefDeallocPass();
-  // mlir::soda::registerForwardMemrefAllocPass();
-  // mlir::soda::registerForwardLinalgFillPass();
-  // mlir::soda::registerForwardMemrefCopyPass();
+  auto thresholds_map = infer->activation_collect_and_calc_th();
 
-  // // SODA Passes
-  // mlir::soda::registerSodaKernelOutliningPass();
-  // mlir::soda::registerSodaKernelGenerationPass();
-  // mlir::soda::registerSodaHostGenerationPass();
-  // mlir::soda::registerSodaAsyncRegionPassPass();
 
-  // // Outlining passes
-  // mlir::soda::registerConvertAllToSODAPass();
-  // mlir::soda::registerConvertOperationToSODAPass();
-  // mlir::soda::registerConvertAffineForToSODAPass();
-  // mlir::soda::registerConvertSCFForToSODAPass();
-  // mlir::soda::registerConvertLinalgDotToSODAPass();
-  // mlir::soda::registerConvertLinalgMatmulToSODAPass();
-  // mlir::soda::registerConvertLinalgConvToSODAPass();
-  // mlir::soda::registerConvertLinalgGenericToSODAPass();
+  std::ofstream cf;  // 创建一个输出文件流对象
+  // 打开文件（如果文件不存在，将创建一个新文件）
+  cf.open("calibration_table.txt");
+  assert(cf.is_open() && "Unable to open the file.");
+  
+  cf << "# genetated time: " << "datetime" << std::endl;
+  cf << "# histogram number: " << "histogram_bin_num" << std::endl;
+  cf << "# sample number: " << "num_samples" << std::endl;
+  cf << "# tune number: " << "tune_num" << std::endl;
+  cf << "# op_name    threshold    min    max" << std::endl;
+  for(auto opName : infer->getAllOpNames()){
+    float threshold = thresholds_map[opName];
+    float min_value = std::get<0>(infer->_activations_statistics[opName]);
+    float max_value = std::get<1>(infer->_activations_statistics[opName]);
+    cf << opName << " " << std::setprecision(7) << threshold << " " << std::setprecision(7) << min_value << " " << std::setprecision(7) << max_value << "\n";
+  }
 
-  // // Optimization passes
-  // mlir::soda::registerPassManagerMiscPass();
-  // mlir::soda::registerSimpleLoweringPass();
-  // mlir::soda::registerOptimizedForBambuPass();
-  // mlir::soda::registerOptimizedForVitisHLSPass();
+  // 关闭文件
+  cf.close();
 
-  // // Conversion passes
 
-  // // ----- SNN -----
-  // mlir::snn::registerSNNPrintPass();
+//dump threshold of MAL3
+  // Open the text file
+  std::ifstream inputFile0("/home/xcgao/projects/forward-opt-cpp/build/firstarg.txt");
+  if (!inputFile0){
+    std::cerr << "Error opening file." << std::endl;
+    return 0;
+  }
+  //Read the data from the file and store it in the 2D array
+  std::string line;
+  int index = 0;
+  float num;
+  float arg0[151296];
+  while (std::getline(inputFile0, line)) {
+    std::istringstream iss(line);
+    while(iss >> num) {
+      arg0[index++] = num;
+    }
+  }
+  llvm::errs() << "index: " << index << "\n";
+  //close file
+  inputFile0.close();
 
-  // return failed(
-  //     mlir::MlirOptMain(argc, argv, "FORWARD optimizer driver\n", registry));
+  index = 0;
+  // Open the text file
+  std::ifstream inputFile1("/home/xcgao/projects/forward-opt-cpp/build/secondarg.txt");
+  if (!inputFile1){
+    std::cerr << "Error opening file." << std::endl;
+    return 0;
+  }
+  //Read the data from the file and store it in the 2D array
+  float arg1[151296];
+  while (std::getline(inputFile1, line)) {
+    std::istringstream iss(line);
+    while(iss >> num) {
+      arg1[index++] = num;
+      // llvm::errs() << index << "\n";
+    }
+  }
+  llvm::errs() << "index: " << index << "\n";
+  //close file
+  inputFile1.close();
+
+  auto matmul = new mlir::FORWARD::MatMul();
+  std::shared_ptr<std::vector<float>> activation = std::make_shared<std::vector<float>>(589824);
+  matmul->setup(arg0, arg1, nullptr, &(activation->data()[0]), 1, 1,
+                768, 197, 768, false, 0, 0, 0, false,
+                0, 0, 0);             
+
+  auto phandle = (void *)matmul;
+  assert(phandle != nullptr);
+  auto matmul_handle = (mlir::FORWARD::MatMul *)phandle;
+  matmul_handle->run();
+
+//define min/max
+    float min_value = std::numeric_limits<float>::infinity();
+    float max_value = -std::numeric_limits<float>::infinity();
+    float abs_value = 0;
+
+    auto act_max = *(std::max_element(activation->begin(), activation->end()));
+    auto act_min = *(std::min_element(activation->begin(), activation->end()));
+    min_value = std::min(act_min, min_value);
+    max_value = std::max(act_max, max_value);
+    abs_value = std::max(abs(min_value), abs(max_value));
+    if(abs_value <= 1e-5){
+      // if op's outputs are all close to zero, change it to 1e-5 for them.
+      min_value = -1e-5;
+      max_value = 1e-5;
+      abs_value = 1e-5;
+      llvm::dbgs() << "[WARNING] layer " << "opname" << " is all zeros. Please check the input data correctness.\n";
+    }
+    // _activations_statistics[module::getName(op).str()] = std::make_tuple(min_value, max_value, abs_value);
+    // abs_value = std::get<2>(_activations_statistics[name]);
+    auto histogramParam = infer->histogram(activation, abs_value);
+    auto hist = histogramParam.first;
+    auto width = histogramParam.second;
+    auto threshold = CaliMath::kl_diversity_hist(&(hist[0]), width, 2048);
+    llvm::errs() << "max: " << max_value << "; min: " << min_value << "; threshold: " << threshold << "\n";
+
+  return 0;
+  
 }
-
-
-// : && /opt/GCC/GCC-9.4.0/bin/g++ -fPIC -fno-semantic-interposition -fvisibility-inlines-hidden 
-// -Werror=date-time -Wall -Wextra -Wno-unused-parameter -Wwrite-strings -Wcast-qual 
-// -Wno-missing-field-initializers -Wimplicit-fallthrough -Wno-class-memaccess -Wno-redundant-move -Wno-pessimizing-move -Wno-noexcept-type -Wdelete-non-virtual-dtor -Wsuggest-override -Wno-comment -Wno-misleading-indentation -fdiagnostics-color -g -Wl,-rpath-link,/home/jhlou/forward-opt/build/lib tools/forward-opt/CMakeFiles/forward-opt.dir/forward-opt.cpp.o -o bin/forward-opt -L/home/jhlou/LLVM17/llvm-project-4553dc46a05ec6f1e2aebcde1ce185772a26780b/build/lib   -L/home/jhlou/LLVM17/llvm-project/build/./lib -Wl,-rpath,"\$ORIGIN/../lib:/home/jhlou/LLVM17/llvm-project/build/./lib"  -lpthread  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRIR.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIROptLib.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLLVMDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLinalgDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMemRefDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAffineDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRArithDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMathDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRFuncDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRSCFDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMLProgramDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRTensorDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRTosaDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRFuncTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLinalgTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAffineTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRSCFTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRReconcileUnrealizedCasts.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMemRefTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLinalgTestPasses.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAffineTransformsTestPasses.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAffineToStandard.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRSCFToControlFlow.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMemRefToLLVM.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMathToLLVM.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMathToLibm.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRArithToLLVM.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRFuncToLLVM.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLinalgToLLVM.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLinalgToStandard.a  lib/libMLIRFORWARDMisc.a  lib/libMLIRFORWARDTransforms.a  lib/libMLIRFORWARDOps.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRBytecodeWriter.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRDebug.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRQuantUtils.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRQuantDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLinalgTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMemRefTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRFuncToLLVM.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRArithToLLVM.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRControlFlowToLLVM.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRTensorTilingInterfaceImpl.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLinalgUtils.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRTensorUtils.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRSCFTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRArithTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRFuncTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRTensorTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRGPUTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAsyncDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRExecutionEngineUtils.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMPasses.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMCoroutines.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMipo.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMVectorize.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMLinker.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMInstrumentation.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMCodeGen.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMIRPrinter.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMObjCARCOpts.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMTarget.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLLVMToLLVMIRTranslation.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAffineTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRSCFUtils.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRArithAttrToLLVMConversion.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRSCFToControlFlow.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMemRefToLLVM.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRVectorToSCF.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRVectorToLLVM.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRVectorTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRBufferizationTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRVectorUtils.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRGPUOps.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRX86VectorTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRX86VectorDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRArmNeonDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRArmSVETransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRArmSVEDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAMXTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAMXDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRTargetLLVMIRExport.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRDLTIDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLLVMIRTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRNVVMDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRTranslateLib.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMFrontendOpenMP.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMScalarOpts.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMAggressiveInstCombine.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMInstCombine.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMTransformUtils.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLLVMCommonConversion.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLLVMDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMBitWriter.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMAnalysis.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMProfileData.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMSymbolize.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMDebugInfoPDB.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMDebugInfoMSF.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMDebugInfoDWARF.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMObject.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMIRReader.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMAsmParser.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMBitReader.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMMCParser.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMMC.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMDebugInfoCodeView.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMTextAPI.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLinalgDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMathDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRParser.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRBytecodeReader.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAsmParser.a 
-// /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRTilingInterface.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAffineToStandard.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRTransforms.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRCopyOpInterface.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRRuntimeVerifiableOpInterface.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAffineUtils.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRTransformUtils.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRRewrite.a  
-// /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRPDLToPDLInterp.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRPDLInterpDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRPDLDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAffineAnalysis.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRSCFDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRBufferizationDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRSparseTensorDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRPresburger.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRVectorDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRVectorInterfaces.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMaskableOpInterface.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMaskingOpInterface.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRPass.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAnalysis.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRDataLayoutInterfaces.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRFuncDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRCallInterfaces.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRControlFlowDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRTensorDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRAffineDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRMemRefDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRControlFlowInterfaces.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRLoopLikeInterface.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRDestinationStyleOpInterface.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRShapedOpInterfaces.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRCastInterfaces.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRComplexDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRParallelCombiningOpInterface.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRSideEffectInterfaces.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMCore.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMBinaryFormat.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMTargetParser.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMRemarks.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMBitstreamReader.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRDialectUtils.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRArithUtils.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRArithDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRInferTypeOpInterface.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRInferIntRangeCommon.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRInferIntRangeInterface.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRDialect.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRViewLikeInterface.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRIR.a  /home/jhlou/LLVM17/llvm-project/build/lib/libMLIRSupport.a  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMSupport.a  -lrt  -ldl  -lpthread  -lm  /usr/lib/x86_64-linux-gnu/libz.so  /usr/lib/x86_64-linux-gnu/libtinfo.so  /home/jhlou/LLVM17/llvm-project/build/lib/libLLVMDemangle.a && :
-// tools/forward-opt/CMakeFiles/forward-opt.dir/forward-opt.cpp.o: In function `main':

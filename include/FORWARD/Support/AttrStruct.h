@@ -10,7 +10,8 @@
 #pragma once
 #include <stdint.h>
 
-namespace tpu_mlir {
+namespace mlir{
+namespace FORWARD {
 
 typedef struct {
   int64_t n;
@@ -221,3 +222,4 @@ typedef struct {
 } deform_gather_attr_t;
 
 } // namespace tpu_mlir
+} // namespace mlir

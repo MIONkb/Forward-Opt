@@ -73,8 +73,8 @@ mlir::LogicalResult BroadCastBinaryLocalGenSupport(mlir::Operation *op);
 
 } // namespace tpu_mlir
 
-#include "tpu_mlir/Support/Module.h"
+#include "FORWARD/Support/Module.h"
 
 /// Include the ODS generated interface header files.
-#include "tpu_mlir/Interfaces/LocalGenInterface.h.inc"
-#include "tpu_mlir/Interfaces/DynLocalGenInterface.h.inc"
+#include "FORWARD/Interfaces/LocalGenInterface.h.inc"
+#include "FORWARD/Interfaces/DynLocalGenInterface.h.inc"

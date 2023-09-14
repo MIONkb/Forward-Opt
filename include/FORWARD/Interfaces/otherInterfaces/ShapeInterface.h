@@ -24,4 +24,4 @@ void broadcast_tensor_reshape(const mlir::Value &expect, mlir::Value &input);
 
 } // namespace tpu_mlir
 /// Include the ODS generated interface header files.
-#include "tpu_mlir/Interfaces/ShapeInterface.h.inc"
+#include "FORWARD/Interfaces/ShapeInterface.h.inc"

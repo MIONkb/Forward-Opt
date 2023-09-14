@@ -1,24 +1,18 @@
-<<<<<<< HEAD
-# Forward-Opt
-=======
-forward-opt: MLIR project to optimize and deploy VIT forward inference on X86
+# forward-opt: MLIR project to optimize and deploy VIT forward inference on X86
 
-Our project will be keep updating in：https://anonymous.4open.science/r/forward-0DC8/
 =======================
 
 Directories:
 
-1. python: python tools for quantization.
+1. python: python tools for quantization and transforming.
 
 2. tools: cpp of forward-opt
 
-3. include/lib: c++ header/source for forwar-opt 
+3. include/lib: c++ headers/sources for forwar-opt 
 
 4. models: torch-mlir models to run
 
 5. bash_tools: some bash scripts
-
-6. bindings: library of pymlir/pybinding
 
 ## Build 
 
@@ -42,11 +36,12 @@ https://github.com/llvm/llvm-project/tree/4553dc46a05ec6f1e2aebcde1ce185772a2678
 
 Install it with ./bash_tools/build_llvm.sh
 
-##### Pybind11
+##### Visual Studio 2022 and its clang-cl component
+If you want to run VIT and link .dll on windows10/11, vs2022 and the integrated clang is 
+neccesary.
 
 ##### Newest torch-mlir 
 
 Please download it from
 
 https://github.com/segmentKOBE/torch-mlir-forward
->>>>>>> origin/new

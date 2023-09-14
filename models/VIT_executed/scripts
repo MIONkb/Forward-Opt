@@ -42,73 +42,58 @@ forward-opt tosa_elided.mlir\
  -o tosa_quantized.mlir
 
 mv tosa_quantized.mlir tosa_opt.mlir 
+#######################
+# quantization end
+#######################
+
 
 #######################
-# quantization ned
+# transform matmul to function call
 #######################
+forward-opt -cse --forward-matmul-to-func tosa.mlir -o vit_outlined.mlir
+generateMatmulAccel.py vit_outlined.mlir > MatmulAccelVIT.c
 
 #######################
 # lower tosa to linalg: this process needs a newer version of mlir-opt than:
 # https://github.com/llvm/llvm-project/tree/4553dc46a05ec6f1e2aebcde1ce185772a26780b
 #######################
-forward-opt  \
+mlir-opt  \
   --pass-pipeline="builtin.module(func.func(tosa-to-tensor,  tosa-to-arith, tosa-to-linalg-named, tosa-to-linalg))"\
-  tosa_opt.mlir  -o linalg_tensor.mlir  \
-  --mlir-print-ir-after-all 2>&1 | cat > before_linalg_intermediate.mlir 
+  vit_outlined.mlir  -o linalg_tensor.mlir  \
+  --mlir-print-ir-after-all 2>&1 | cat > before_linalg_intermediate.mlir  
 
 
 #######################
 # lower linalg
 #######################
 mlir-opt \
- --promote-buffers-to-stack --linalg-bufferize --empty-tensor-to-alloc-tensor  \
- --tensor-bufferize --func-bufferize --arith-bufferize --bufferization-bufferize \
- --convert-linalg-to-affine-loops  --promote-buffers-to-stack --canonicalize\
- linalg_tensor.mlir > affine.mlir
+ --convert-tensor-to-linalg  -empty-tensor-to-alloc-tensor \
+ --eliminate-empty-tensors  -linalg-bufferize \
+ -buffer-results-to-out-params --cse --canonicalize \
+ -linalg-generalize-named-ops \
+ -arith-bufferize -func-bufferize  -tensor-bufferize \
+ -convert-linalg-to-affine-loops -fold-memref-alias-ops --canonicalize \
+ linalg_tensor.mlir -o affine.mlir
 
-mlir-opt --arith-expand --memref-expand \
- -normalize-memrefs  --affine-simplify-structures \
- --affine-loop-fusion  --cse\
- -lower-affine --scf-for-loop-canonicalization  -convert-scf-to-cf\
+mlir-opt \
+  -promote-buffers-to-stack --arith-expand --memref-expand  \
+ -normalize-memrefs --expand-strided-metadata  -lower-affine \
+ --scf-for-loop-canonicalization -convert-scf-to-cf \
  --convert-math-to-llvm --convert-math-to-libm \
  --convert-arith-to-llvm \
+ --finalize-memref-to-llvm="use-opaque-pointers" \
  -convert-func-to-llvm=use-bare-ptr-memref-call-conv \
- -convert-memref-to-llvm --reconcile-unrealized-casts \
- affine.mlir -o llvm.mlir \
- --mlir-print-ir-after-all 2>&1 | cat > intermediate_llvm.mlir
-
-
-#######################
-# lower linalg to affine
-#######################
-mlir-opt  --canonicalize \
-  -linalg-fuse-elementwise-ops --convert-tensor-to-linalg  -empty-tensor-to-alloc-tensor \
-  --eliminate-empty-tensors  --cse --canonicalize -linalg-bufferize -arith-bufferize \
-  -tensor-bufferize -func-bufferize  -finalizing-bufferize -buffer-deallocation \
-  -buffer-results-to-out-params --cse --canonicalize -linalg-generalize-named-ops \
-  -convert-linalg-to-affine-loops -fold-memref-alias-ops --canonicalize \
-  linalg_tensor.mlir -o affine.mlir 
-  
-#######################
-# lower LLVM IR
-#######################
-mlir-opt   --erase-memory-copy --affine-simplify-structures --canonicalize   \
-  --affine-simplify-structures --forward-memref-allocations  --lower-affine \
-  --canonicalize --cse   | ./thirdparty/Polygeist/llvm-project/build/bin/mlir-opt --lower-affine   \
-  -convert-vector-to-scf -convert-linalg-to-loops   --lower-affine --convert-scf-to-cf \
-  --canonicalize --cse -convert-linalg-to-llvm -convert-vector-to-llvm --convert-math-to-llvm  \
-  --convert-math-to-libm --lower-affine --arith-expand -convert-arith-to-llvm --memref-expand \
-  --convert-memref-to-llvm --convert-func-to-llvm="use-bare-ptr-memref-call-conv=1" --convert-index-to-llvm  \
-  -reconcile-unrealized-casts  --cse |  ./thirdparty/Polygeist/bin/polygeist-opt --lower-affine  \
-  --convert-polygeist-to-llvm="use-c-style-memref=1" --canonicalize  \
+ --finalize-memref-to-llvm="use-opaque-pointers" \
+ --cse --canonicalize \
+ --reconcile-unrealized-casts \
  affine.mlir -o llvm.mlir
 
-mlir-translate llvm.mlir --mlir-to-llvmir -opaque-pointers=0 -o forward.ll
-
-  
+ mlir-translate llvm.mlir --mlir-to-llvmir -opaque-pointers=0 -o forward.ll
+ opt -O3  forward.ll -S -o "forward_opt.ll"
 #######################
-# compile
+# Now we get two files : forward_opt.ll(contains the model) and MatmulAccelVIT.c(contains the function call to .dll)
+# following scripts runs towards win10-x86-mscv(visual studio)
+# Please check ./onWin11 directory
 #######################
 
-llc forward.ll  --filetype=obj -o forward.o
-g++  -o main test_vit.cpp  forward.o  -lm
+

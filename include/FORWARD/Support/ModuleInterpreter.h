@@ -42,7 +42,7 @@ public:
   std::shared_ptr<std::vector<float>> invoke_at(std::string name);
   void invoke_from(const std::string op_name);
   // void backward_weight_at(std::string name, const void *dst_grd, const int dst_grd_len, const void *weight_grd, const int weight_grd_len);
-  void setTensor(const std::string &name, const void *data, size_t size,
+  void setTensor(const std::string &name, std::shared_ptr<std::vector<float>> data, size_t size,
                  bool is_integer = false);
   std::shared_ptr<std::vector<float>> getTensor(const std::string &name,
                                                 bool express_type = false);
@@ -51,6 +51,10 @@ public:
   llvm::ArrayRef<int64_t> getTensorShape(const std::string &name);
   bool is_no_mem_op(Operation *op);
   void printValuemap();
+<<<<<<< HEAD
+=======
+  void printMemmap();
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
 
 private:
   // void allocate_part_tensor_in_mem();
@@ -67,18 +71,26 @@ public:
   std::string weightnpz;
   std::vector<std::string> input_names;
   std::vector<std::string> output_names;
-  std::vector<std::string>
-      all_tensor_names; // activation tensor, without weight
+  std::vector<std::string> all_tensor_names; // activation tensor, without weight
   std::vector<std::string> all_weight_names; // weight tensor
   std::map<std::string, std::shared_ptr<std::vector<float>>> mem_map;
+<<<<<<< HEAD
+=======
+  std::map<std::string, Value> value_map;
+  std::map<std::string, std::shared_ptr<InferenceParameter>> inference_map;
+  // std::map<Value*, std::string> name_map;
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
 
 private:
   ModuleOp module;
   int64_t num_infer_op;
   mem_mode_t mem_mode;
   int64_t total_count;
+<<<<<<< HEAD
   std::map<std::string, Value> value_map;
   std::map<std::string, std::shared_ptr<InferenceParameter>> inference_map;
+=======
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
 
 };
 

@@ -12,4 +12,4 @@
 #include "mlir/IR/OpDefinition.h"
 
 /// Include the ODS generated interface header files.
-#include "tpu_mlir/Interfaces/FlopsInterface.h.inc"
+#include "FORWARD/Interfaces/FlopsInterface.h.inc"

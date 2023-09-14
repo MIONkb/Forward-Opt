@@ -23,9 +23,9 @@ if [[ $# -ne 3 ]] ; then
 fi
 
 # LLVM source
-LLVM_SRC_DIR="/home/xcgao/tools/llvm-project-17/"
-build_dir="/home/xcgao/tools/llvm-project-17/install"
-install_dir="/home/xcgao/tools/llvm-project-17/install"
+LLVM_SRC_DIR="/home/jhlou/LLVM17/llvm-project-4553dc46a05ec6f1e2aebcde1ce185772a26780b/"
+build_dir="/home/jhlou/LLVM17/llvm-project-4553dc46a05ec6f1e2aebcde1ce185772a26780b/build/"
+install_dir="/home/jhlou/LLVM17/llvm-project-4553dc46a05ec6f1e2aebcde1ce185772a26780b/build/"
 
 if ! [ -f "$LLVM_SRC_DIR/llvm/CMakeLists.txt" ]; then
   echo "Expected the path to LLVM to be set correctly (got '$LLVM_SRC_DIR'): can't find CMakeLists.txt"
@@ -48,16 +48,17 @@ cmake -GNinja \
   -DLLVM_INSTALL_UTILS=ON     -DLLVM_ENABLE_LLD=OFF  \
   -DLLVM_ENABLE_PROJECTS="mlir;clang"    \
   -DLLVM_DEFAULT_TARGET_TRIPLE="riscv64-unknown-elf"   \
-  -DLLVM_TARGETS_TO_BUILD="host;RISCV"     \
+  -DLLVM_TARGETS_TO_BUILD="host;RISCV;AArch64"     \
   -DLLVM_INCLUDE_TOOLS=ON     \
   -DLLVM_BUILD_TOOLS=ON     -DLLVM_INCLUDE_TESTS=ON     \
   -DMLIR_INCLUDE_TESTS=ON     -DMLIR_ENABLE_BINDINGS_PYTHON=ON   \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo   \
   -DLLVM_ENABLE_ASSERTIONS=On   \
   -DLLVM_BUILD_EXAMPLES=OFF \
-  -Dpybind11_DIR=/home/xcgao/tools/pybind11/build/usr/local/share/cmake/pybind11/
+  -Dpybind11_DIR="/home/jhlou/Tools/pybind11-2.11.1/build/mock_install/share/cmake/pybind11/"
 
  # TODO check what these options do :
  # -DLLVM_OPTIMIZED_TABLEGEN=ON -DLLVM_ENABLE_OCAMLDOC=OFF -DLLVM_ENABLE_BINDINGS=OFF 
+ninja -j 15 install
 
 cmake --build "$build_dir" --target opt mlir-opt mlir-translate mlir-cpu-runner install

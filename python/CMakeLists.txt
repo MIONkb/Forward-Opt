@@ -69,6 +69,7 @@ set(TOOLS_FILES
   trans.py
   seperate_weights.py
   run_calibration.py
+  generateMatmulAccel.py
   utils/mlir_parser.py
   utils/misc.py
   utils/preprocess.py
@@ -102,6 +103,16 @@ GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)")
 add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/bin/run_calibration.py COMMAND
 ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/copy_runcalibration.cmake)
 
+# This chicanery is necessary to ensure executable permissions.
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/copy_generateMatmulAccel.cmake"
+"file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/generateMatmulAccel.py
+DESTINATION ${PROJECT_BINARY_DIR}/bin
+FILE_PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_WRITE
+GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)")
+
+add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/bin/generateMatmulAccel.py COMMAND
+${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/copy_generateMatmulAccel.cmake)
+
 foreach(file ${TOOLS_SUBFILES})
 add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/bin/${file}
                     COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/${file}
@@ -109,8 +120,11 @@ add_custom_command(OUTPUT ${PROJECT_BINARY_DIR}/bin/${file}
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/${file})
 endforeach()
 
+
+
 # Install our python stuff too.
-install(PROGRAMS seperate_weights.py run_calibration.py trans.py DESTINATION ${PYTHON_INSTALL_PATH})
+install(PROGRAMS seperate_weights.py run_calibration.py trans.py generateMatmulAccel.py
+  DESTINATION ${PYTHON_INSTALL_PATH})
 #foreach(file ${TOOLS_SUBFILES})
 #  install(PROGRAMS ${file} DESTINATION ${PYTHON_INSTALL_PATH}/)
 #endforeach()

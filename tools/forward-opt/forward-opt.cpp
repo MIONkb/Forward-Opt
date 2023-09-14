@@ -110,6 +110,7 @@ int main(int argc, char **argv) {
   mlir::FORWARD::registerTestPrintOpNestingPass();
   mlir::registerImportCalibrationTable();
   mlir::registerTransformToQuantizedPass();
+  mlir::registerMatmulToFunc();
 
 
   return failed(

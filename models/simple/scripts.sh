@@ -52,7 +52,7 @@ mv tosa_quantized.mlir tosa_opt.mlir
 # https://github.com/llvm/llvm-project/tree/4553dc46a05ec6f1e2aebcde1ce185772a26780b
 #######################
 forward-opt  \
-  --pass-pipeline="builtin.module(func.func(tosa-to-tensor,  tosa-to-arith, tosa-to-linalg-named, tosa-to-linalg))"\
+  --pass-pipeline="builtin.module(func.func(tosa-to-tensor,  tosa-to-arith, tosa-to-linalg-named, tosa-to-linalg))" \
   tosa_opt.mlir  -o linalg_tensor.mlir  \
   --mlir-print-ir-after-all 2>&1 | cat > before_linalg_intermediate.mlir 
 

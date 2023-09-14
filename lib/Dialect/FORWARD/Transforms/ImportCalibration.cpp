@@ -13,6 +13,7 @@
 #include "FORWARD/Support/ModuleInterpreter.h"
 
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/Attributes.h"
 #include "mlir/Dialect/Tosa/IR/TosaOps.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
@@ -45,7 +46,7 @@ public:
     //   llvm_unreachable("wrong mlir state");
     // }
     OpBuilder builder(mOp);
-    std::map<std::string, cali_info> calibration_map;
+    std::map<int, cali_info> calibration_map;
     std::map<std::string, cali_info> calibration_map_int4;
     std::map<std::string, f64_array_t> per_chan_scales_map;
     std::ifstream infile(this->tableFile);
@@ -55,6 +56,8 @@ public:
     std::string line;
     std::regex cali_pattern("\\S+\\s+[-0-9.e]+\\s+[-0-9.e]+\\s+[-0-9.e]+");
     std::regex info_pattern("#.*");
+    std::regex id_pattern("([0-9]+)\\.");
+    std::regex input_pattern("input_");
     bool weight_scale_meeted = false;
     bool int4_th_meeted = false;
     while (std::getline(infile, line)) {
@@ -64,6 +67,7 @@ public:
 
       std::istringstream iss(line);
       std::string name;
+      int id;
       if (weight_scale_meeted) { // third run, read weight_scale
         std::string name;
         double value;
@@ -97,7 +101,18 @@ public:
             llvm::errs() << line;
             llvm_unreachable("\n  => not match required format\n");
           }
-          calibration_map[name] = info;
+          std::smatch match;
+          bool found;
+          found = std::regex_search(name, match, input_pattern);
+          if(found){
+            continue;
+          }
+          found = std::regex_search(name, match, id_pattern);
+          assert(found);
+          // std::cout << "name:" << name 
+            // << ", match[1].str():" << match[1].str() << std::endl;
+          id = std::stoi(match[1].str());
+          calibration_map[id] = info;
         } else if (std::regex_match(line, info_pattern) &&
                    std::string::npos != line.find("#int4_th")) {
           int4_th_meeted = true;
@@ -107,6 +122,7 @@ public:
     double min, max;
     for (auto func : mOp.getOps<FuncOp>()) {
       func.walk([&](Operation *op) {
+        llvm::errs() <<"op:" ; op->dump();
         // if (isa<tpu_mlir::InferenceInterface>(op) || isa<InputOp>(op)) {
         if(FORWARD::isInferenceOp(op)){
           for (auto value : op->getResults()) {
@@ -119,9 +135,10 @@ public:
             }
 
             auto name = module::getName(value).str();
+            int id = std::stoi(op->getAttr("idx").cast<StringAttr>().getValue().str());
             cali_info info = {0, 0, 0};
-            if (calibration_map.find(name) != calibration_map.end()) {
-              info = calibration_map[name];
+            if (calibration_map.find(id) != calibration_map.end()) {
+              info = calibration_map[id];
             }
             // if (calibration_map_int4.size() > 0 &&
             //     (module::isInt4Op(op) ||
@@ -137,8 +154,11 @@ public:
             if (min == 0 && max == 0) {
               continue;
             }
+            
             auto quant_type = quant::CalibratedQuantizedType::get(
                 type.getElementType(), min, max);
+            // std::cout /* << "type:" << type */
+            //     << ", quant_type:" << quant_type << std::endl;
             auto new_type = RankedTensorType::get(type.getShape(), quant_type);
             value.setType(new_type);
           }
@@ -150,6 +170,7 @@ public:
                                      *per_chan_scales_map[str]}));
           }
         }
+        llvm::errs() <<"after handle- op:" ; op->dump();
       });
     }
 

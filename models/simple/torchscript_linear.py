@@ -28,29 +28,24 @@ print(ins)
 
 r = ins(torch.ones(1, 3, 16, 16))
 
-# 打开文件以供写入
+# 生成torch层
 file = open("TORCH.mlir", "w")
-# # 将输出打印到文件
 module = torch_mlir.compile(ins, torch.ones(1, 3, 16, 16), output_type="torch", use_tracing = True)
 print(module.operation.get_asm(large_elements_limit=2), file=file)
-# # 关闭文件
 file.close()
 
 
-# 打开文件以供写入
+# 生成Linalg层
 file = open("LINALG_TENSOR.mlir", "w")
 module = torch_mlir.compile(ins, torch.ones(1, 3, 16, 16), output_type="linalg-on-tensors", use_tracing = True)
-# print(module.operation.get_asm(large_elements_limit=10), file=file)
 print(module.operation.get_asm(), file=file)
-# # 关闭文件
 file.close()
 
-# # 打开文件以供写入
-# file = open("TOSA_test.mlir", "w")
-# module = torch_mlir.compile(ins, torch.ones(1, 3, 16, 16), output_type="tosa", use_tracing = True)
-# print(module.operation.get_asm(large_elements_limit=2), file=file)
-# # # 关闭文件
-# file.close()
+# 生成tosa层
+file = open("TOSA_test.mlir", "w")
+module = torch_mlir.compile(ins, torch.ones(1, 3, 16, 16), output_type="tosa", use_tracing = True)
+print(module.operation.get_asm(large_elements_limit=2), file=file)
+file.close()
 
 # module = torch_mlir.compile(resnet18, torch.ones(1, 3, 224, 224), output_type="RAW")
 # print("LINALG_ON_TENSORS OutputType\n", module.operation.get_asm(large_elements_limit=10))

@@ -41,5 +41,21 @@ def TransformToQuantized : Pass<"forward-transform-to-quantized", "ModuleOp"> {
   ];
 }
 
+def MatmulToFunc : Pass<"forward-matmul-to-func", "ModuleOp"> {
+  let summary = "Convert tosa matmul ops to func call of matmul on accelerators";
+  let constructor = "::mlir::FORWARD::createMatmulToFunc()";
+  let dependentDialects = ["mlir::tosa::TosaDialect"];
+  let options = [
+//     Option<"mode", "mode", "std::string", /*default=*/"",
+//            "default quantization mode: INT8/BF16/F32">,
+//     Option<"qtable", "qtable", "std::string", /*default=*/"",
+//            "a table of Ops that quantized to specific mode">,
+//     Option<"isAsymmetric", "asymmetric", "bool", /*default=*/"false",
+//            "true for asymmetric quantization, or false for symmetric">,
+//     Option<"weightFileName", "weightFileName", "std::string", /*default=*/"",
+//            "weight file name to save">,
+  ];
+}
+
 
 #endif // FORWARD_DIALECT_PASSES

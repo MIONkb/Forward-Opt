@@ -93,7 +93,7 @@ TORCH_mlir = torch_mlir.compile(
     output_type=torch_mlir.OutputType.TOSA,
     use_tracing=True)
 file_path = 'vit.txt'
-new_path = 'TORCH.mlir'
+new_path = 'tosa.mlir'
 with open(file_path, 'wt') as f:
-    print(TORCH_mlir.operation.get_asm(), file=f)
+    print(TORCH_mlir.operation.get_asm(large_elements_limit=2), file=new_path)
 os.rename(file_path,new_path)

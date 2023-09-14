@@ -1,8 +1,8 @@
 add_subdirectory(cnpy)
 
-# install(FILES oneDNN/lib/libdnnl.so
-#               oneDNN/lib/libdnnl.so.3
-#               oneDNN/lib/libdnnl.so.3.1
+#install(FILES oneDNN/lib/libdnnl.so
+#              oneDNN/lib/libdnnl.so.3
+#              oneDNN/lib/libdnnl.so.3.1
 #               caffe/lib/libboost_filesystem.so.1.65.1
 #               caffe/lib/libboost_python3-py36.so.1.65.1
 #               caffe/lib/libboost_regex.so.1.65.1
@@ -28,7 +28,7 @@ add_subdirectory(cnpy)
 #               CV18xx/lib/libcviruntime.so
 #               CV18xx/lib/libcvicmodel.so
 #               CV18xx/lib/libunwind.so.8
-#         DESTINATION lib)
+#        DESTINATION lib)
 
 # install(PROGRAMS llvm/bin/mlir-opt
 #                  llvm/bin/mlir-translate

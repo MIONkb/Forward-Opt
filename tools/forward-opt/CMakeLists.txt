@@ -66,12 +66,12 @@ set(SOURCES
   forward-opt.cpp
 )
 
-add_llvm_executable(forward-opt ${SOURCES})
+add_llvm_executable(forward-opt-cpp ${SOURCES})
 
-llvm_update_compile_flags(forward-opt)
-target_link_libraries(forward-opt PRIVATE ${LIBS})
-llvm_update_compile_flags(forward-opt)
+llvm_update_compile_flags(forward-opt-cpp)
+target_link_libraries(forward-opt-cpp PRIVATE ${LIBS})
+llvm_update_compile_flags(forward-opt-cpp)
 
-mlir_check_link_libraries(forward-opt)
+mlir_check_link_libraries(forward-opt-cpp)
 
-install(TARGETS forward-opt)
+install(TARGETS forward-opt-cpp)

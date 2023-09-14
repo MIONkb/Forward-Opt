@@ -21,8 +21,13 @@
 #include <memory>
 #include <numeric>
 
+<<<<<<< HEAD
 #include "FORWARD/Support/tosa_ext/tosa_const.h"
 #include "FORWARD/Support/tosa_ext/tosa_ext.h"
+=======
+#include "FORWARD/Dialect/FORWARD/tosa_ext/tosa_const.h"
+#include "FORWARD/Dialect/FORWARD/tosa_ext/tosa_ext.h"
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
 
 #define DEBUG_TYPE "interpreter"
 
@@ -137,7 +142,7 @@ void ModuleInterpreter::collect_tensor(Value v) {
 
   mem_map[name] = std::make_shared<std::vector<float>>(count);
   value_map[name] = v;
-  all_tensor_names.push_back(name);
+  // name_map[&v] = name;
 }
 
 // void ModuleInterpreter::allocate_part_tensor_in_mem() {
@@ -279,6 +284,11 @@ void ModuleInterpreter::allocate_all_tensor_in_mem() {
         LLVM_DEBUG(llvm::dbgs() << " Function Input:" << name <<",count:" << count <<"\n" );
         mem_map[name] = std::make_shared<std::vector<float>>(count);
         value_map[name]=arg;
+<<<<<<< HEAD
+=======
+        input_names.push_back(name);
+        // name_map[&arg]=name;
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
         idx++;
       }
     }
@@ -302,6 +312,7 @@ void ModuleInterpreter::allocate_all_tensor_in_mem() {
         mem_map[name] = read_as_float(wOp);
         all_weight_names.push_back(name);
         value_map[name] = v;
+<<<<<<< HEAD
       } 
       // else if (is_no_mem_op(op)) {
       //   LLVM_DEBUG(llvm::dbgs() << " Not ConstOp:" << *op <<"\n" );
@@ -311,8 +322,13 @@ void ModuleInterpreter::allocate_all_tensor_in_mem() {
       //   all_tensor_names.push_back(name);
       //   value_map[name] = v;
       // } 
+=======
+        // name_map[&v] = name;
+      } 
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
       else {
         LLVM_DEBUG(llvm::dbgs() << " Not ConstOp:" << *op <<"\n" );
+        all_tensor_names.push_back(module::getName(op).str());
         for (auto r : op->getResults()) {
           collect_tensor(r);
         }
@@ -325,6 +341,10 @@ void ModuleInterpreter::allocate_all_tensor_in_mem() {
 
     // input output buffers for all ops
     func.walk([&](Operation *op) {
+<<<<<<< HEAD
+=======
+      // llvm::errs() << "opname: " << op->getName().getStringRef().str() << "\n";
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
       // op in function body
       if (isInferenceOp(op)){
       // if (auto infer_op = llvm::dyn_cast<InferenceInterface>(op)) {
@@ -348,13 +368,19 @@ void ModuleInterpreter::allocate_all_tensor_in_mem() {
             param->inputs.push_back(nullptr);
             continue;
           }
+          std::string input_name;
           if (BlockArgument::classof(input)) {
-            LLVM_DEBUG(llvm::dbgs() << "[Info] an input" << input <<"\n");
+            // LLVM_DEBUG(llvm::dbgs() << "[Info] an input" << input <<"\n");
+            for(auto iter:value_map){
+              if(iter.second == input)
+                input_name = iter.first;
+            }
             // param->inputs.push_back(nullptr); check this
-            continue;
+            // continue;
+          }else{
+            input_name = module::getName(input).str();
           }
-          auto input_name = module::getName(input).str();
-          LLVM_DEBUG(llvm::dbgs() << "[Info] input_name:" << input_name <<"\n");
+          // LLVM_DEBUG(llvm::dbgs() << "[Info] input_name:" << input_name <<"\n");
           if (mem_map.find(input_name) == mem_map.end()) {
             input.dump();
             llvm_unreachable("input operands not allocated");
@@ -362,7 +388,7 @@ void ModuleInterpreter::allocate_all_tensor_in_mem() {
             param->inputs.push_back(mem_map[input_name]->data());
           }
         }
-        LLVM_DEBUG(llvm::dbgs() << "[Info] second for" <<"\n");
+        // LLVM_DEBUG(llvm::dbgs() << "[Info] second for" <<"\n");
         // LLVM_DEBUG(llvm::dbgs() << "init: '" << name << "'\n");
         // if (failed(infer_op.init(*param))) {
         //   op->dump();
@@ -685,6 +711,10 @@ void ModuleInterpreter::invoke_part_in_mem(bool express_type) {
 
 std::shared_ptr<std::vector<float>>
 ModuleInterpreter::invoke_at(const std::string op_name) {
+<<<<<<< HEAD
+=======
+  llvm::dbgs() << "[INFO] invoke at " << op_name <<"\n";
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
   //module::init(module);
   // LLVM_DEBUG(llvm::dbgs() << "[ERROR] print value_map when load!!!!!" <<"\n");
   // for(auto val : value_map){
@@ -698,10 +728,29 @@ ModuleInterpreter::invoke_at(const std::string op_name) {
   auto v = value_map[op_name];
   auto op = v.getDefiningOp();
   LLVM_DEBUG(llvm::errs()<<"[invoke]op:" << op->getName().getStringRef().str());
+<<<<<<< HEAD
   LLVM_DEBUG(llvm::errs()<<"[invoke]op:" << ::mlir::tosa::TransposeOp::getOperationName());
   if(op->getName().getStringRef().str() == ::mlir::tosa::TransposeOp::getOperationName()){
       ::mlir::tosa::tosa_transpose_shape_infer(op, this);
   }
+=======
+  LLVM_DEBUG(llvm::errs()<<"[invoke]operandNum:" << op->getNumOperands() << "\n");
+  // op->dump();
+  // this->module->dump();
+  // LLVM_DEBUG(llvm::errs()<<"[invoke]op:" << ::mlir::tosa::TransposeOp::getOperationName());
+  if(op->getName().getStringRef().str() == ::mlir::tosa::TransposeOp::getOperationName()){
+      ::mlir::tosa::tosa_transpose_infer(op, this);
+  }else if(op->getName().getStringRef().str() == ::mlir::tosa::AddOp::getOperationName()){
+      ::mlir::tosa::tosa_add_infer(op, this);
+  }else if(op->getName().getStringRef().str() == ::mlir::tosa::Conv2DOp::getOperationName()){
+      ::mlir::tosa::tosa_conv2d_infer(op, this);
+  }else if(op->getName().getStringRef().str() == ::mlir::tosa::MatMulOp::getOperationName()){
+      ::mlir::tosa::tosa_matmul_infer(op, this);
+  }
+  // else if(op->getName().getStringRef().str() == ::mlir::tosa::TransposeOp::getOperationName()){
+  //     ::mlir::tosa::tosa_transpose_shape_infer(op, this);
+  // }
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
   // if (op == nullptr){
   // if (false == isa<InferenceInterface>(op)){
   //   llvm::errs() << "what's getDefiningOp???\n";
@@ -793,19 +842,42 @@ void ModuleInterpreter::invoke_from(const std::string op_name) {
 //   return;
 // }
 void ModuleInterpreter::printValuemap(){
+<<<<<<< HEAD
   LLVM_DEBUG(llvm::dbgs() << "[ERROR] print value_map when load!!!!!" <<"\n");
+=======
+  llvm::dbgs() << "[ERROR] print value_map!!!!!" <<"\n";
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
   for(auto val : value_map){
     llvm::errs() << "[value_map]" << val.first << "; " << val.second  << "\n";
     // val.second.dump();
   }
+<<<<<<< HEAD
+=======
+  llvm::dbgs() << "[ERROR] print end!!!!!" <<"\n";
 }
 
-void ModuleInterpreter::setTensor(const std::string &name, const void *data,
+void ModuleInterpreter::printMemmap(){
+  llvm::dbgs() << "[ERROR] print mem_map!!!!!" <<"\n";
+  for(auto mem : mem_map){
+    llvm::errs() << "[mem_map]" << mem.first << "; " << mem.second->size()  << "\n";
+    // val.second.dump();
+  }
+  llvm::dbgs() << "[ERROR] print end!!!!!" <<"\n";
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
+}
+
+void ModuleInterpreter::setTensor(const std::string &name, std::shared_ptr<std::vector<float>> data,
                                   size_t size, bool is_integer) {
   // module::init(module);
+<<<<<<< HEAD
   for(auto mem : mem_map){
     llvm::errs() << "[mem_map]" << mem.first  << "\n";
   }
+=======
+  // for(auto mem : mem_map){
+  //   llvm::errs() << "[mem_map]" << mem.first  << "\n";
+  // }
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
   auto it = mem_map.find(name);
   if (it == mem_map.end()) {
     llvm::errs() << "Can't find op name: " << name << "\n";
@@ -813,12 +885,13 @@ void ModuleInterpreter::setTensor(const std::string &name, const void *data,
   }
 
   auto act = it->second;
-  if (act->size() * sizeof(float) != size) {
+  if (act->size() * sizeof( float) != size) {
     llvm::errs() << "Tensor " << name
                  << " data need size: " << act->size() * sizeof(float)
                  << " , but set size: " << size << "\n";
     llvm_unreachable("Error, setTensor failed");
   }
+<<<<<<< HEAD
   memcpy(act->data(), data, size);
   // LLVM_DEBUG(llvm::dbgs() << "value" << value_map[name] << "\n");
   // auto value = value_map.at(name);
@@ -835,6 +908,27 @@ void ModuleInterpreter::setTensor(const std::string &name, const void *data,
   // } else {
   //   LLVM_DEBUG(llvm::dbgs() << "before memcpy\n");
   //   memcpy(act->data(), data, size);
+=======
+  //获取原始指针
+  // for(int i = 0; i < data->size(); i++){
+  //   llvm::errs() << data->at(i) <<"\n";
+  // }
+  auto value = value_map.at(name);
+  if (is_integer == false && module::isUniformQuantized(value)) {
+    auto qtype = module::getUniformQuantizedType(value);
+    for (uint32_t i = 0; i < act->size(); i++) {
+      float d =
+          data->at(i) * (float)(1 / qtype.getScale()) + (float)qtype.getZeroPoint();
+      act->at(i) = qtype.isSigned() ? to_int8(d) : to_uint8(d);
+    }
+  }else{
+    memcpy(act->data(), data->data(), size);
+  }
+  // const void* dataConstVoid = static_cast<const void*>(data.get());
+  // memcpy(act->data(), dataConstVoid, size);
+  // for(int i = 0; i < data->size(); i++){
+  //   llvm::errs() << act->at(i) << " " << mem_map[name]->at(i) << " "<< data->at(i) <<"\n";
+>>>>>>> d893dfaa1cd7d29ee553fcd73d9eb4f8287d1237
   // }
 }
 

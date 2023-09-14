@@ -66,6 +66,7 @@ set(LIBS
   # MLIRFuncTransforms
   # MLIRFuncInlinerExtension
 
+  MLIRFORWARDTOSAExt
   MLIRTransforms
   MLIRParser
   MLIRCAPIDebug
@@ -80,6 +81,7 @@ set(SOURCES
 )
 
 add_llvm_executable(test-opt ${SOURCES})
+
 
 llvm_update_compile_flags(test-opt)
 target_link_libraries(test-opt PRIVATE ${LIBS})

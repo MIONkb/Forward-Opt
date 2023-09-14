@@ -1,0 +1,94 @@
+
+#######################
+# Now we get two files : forward_opt.ll(contains the model) and MatmulAccelVIT.c(contains the function call to .dll)
+# following scripts runs towards win10-x86-mscv(visual studio)
+#######################
+## llvm to asm
+clang -cc1 -O2 -S ^
+ -disable-free -clear-ast-before-backend -disable-llvm-verifier ^
+ -discard-value-names -main-file-name forward_opt.ll ^
+ -mrelocation-model static -mframe-pointer=all -fmath-errno^
+ -ffp-contract=on -fno-rounding-math -mconstructor-aliases ^
+ -target-cpu x86-64 -mllvm -treat-scalable-fixed-error-as-warning -v ^
+ "-fcoverage-compilation-dir=D:\\Engineer\\forward-demo\\demo\\models\\simple" ^
+ -resource-dir "D:\\Apps\\VisualStudio2023\\VS2023\\VC\\Tools\\Llvm\\lib\\clang\\16" ^
+ "-fdebug-compilation-dir=D:\\Engineer\\forward-demo\\demo\\models\\simple" ^
+ -ferror-limit 19 -fmessage-length=120 -fno-use-cxa-atexit ^
+ -fms-extensions -fms-compatibility -fms-compatibility-version=19.37.32822 ^
+ -fdelayed-template-parsing -fcolor-diagnostics ^
+ -faddrsig -target-feature +64bit-mode,+cx16^
+ -o "D:\\Engineer\\forward-demo\\demo\\models\\simple\\forward.asm" ^
+ -x ir forward.ll
+ 
+clang -cc1as -triple i686-pc-windows-msvc^
+ -filetype obj ^
+ -target-cpu x86-64 -target-feature +64bit-mode ^
+ -I "D:\\Engineer\\forward-demo\\demo\\include" ^
+ "-fdebug-compilation-dir=D:\\Engineer\\forward-demo\\demo\\models\\simple" ^
+ -dwarf-version=4 -mrelocation-model static -mrelax-all ^
+ -mincremental-linker-compatible ^
+ -o "D:\\Engineer\\forward-demo\\demo\\models\\simple\\forward.obj" ^
+ "D:\\Engineer\\forward-demo\\demo\\models\\simple\\forward.asm" 
+
+dumpbin /headers forward.obj
+
+## c to asm
+D:\Apps\llvm-project-18\build\bin\clang -cc1 -O2 -triple i686-pc-windows-msvc19.37.32822 ^
+ -S -disable-free -clear-ast-before-backend ^
+ -disable-llvm-verifier -discard-value-names ^
+ -main-file-name MatmulAccelRuntime.cpp ^
+ -mrelocation-model static -mframe-pointer=all ^
+ -fmath-errno -ffp-contract=on -fno-rounding-math ^
+ -mconstructor-aliases -target-cpu x86-64 -mllvm ^
+ -treat-scalable-fixed-error-as-warning -v ^
+ "-fcoverage-compilation-dir=D:\\Engineer\\forward-demo\\demo\\models\\simple" ^
+ -resource-dir "D:\\Apps\\VisualStudio2023\\VS2023\\VC\\Tools\\Llvm\\lib\\clang\\16" ^
+ -I "D:\\Engineer\\forward-demo\\demo\\include" ^
+ -internal-isystem "D:\\Apps\\VisualStudio2023\\VS2023\\VC\\Tools\\Llvm\\lib\\clang\\16\\include" ^
+ -internal-isystem "D:\\Apps\\VisualStudio2023\\VS2023\\VC\\Tools\\MSVC\\14.37.32822\\include" ^
+ -internal-isystem "D:\\Apps\\VisualStudio2023\\VS2023\\VC\\Tools\\MSVC\\14.37.32822\\ATLMFC\\include" ^
+ -internal-isystem "D:\\Apps\\VisualStudio2023\\VS2023\\VC\\Auxiliary\\VS\\include" ^
+ -internal-isystem "D:\\Windows Kits\\10\\include\\10.0.22621.0\\ucrt" ^
+ -internal-isystem "D:\\Windows Kits\\10\\\\include\\10.0.22621.0\\\\um" ^
+ -internal-isystem "D:\\Windows Kits\\10\\\\include\\10.0.22621.0\\\\shared" ^
+ -internal-isystem "D:\\Windows Kits\\10\\\\include\\10.0.22621.0\\\\winrt" ^
+ -internal-isystem "D:\\Windows Kits\\10\\\\include\\10.0.22621.0\\\\cppwinrt" ^
+ -internal-isystem "D:\\Apps\\VisualStudio2023\\VS2023\\VC\\Tools\\MSVC\\14.37.32822\\include" ^
+ -internal-isystem "D:\\Apps\\VisualStudio2023\\VS2023\\VC\\Tools\\MSVC\\14.37.32822\\ATLMFC\\include" ^
+ -internal-isystem "D:\\Apps\\VisualStudio2023\\VS2023\\VC\\Auxiliary\\VS\\include" ^
+ -internal-isystem "D:\\Windows Kits\\10\\include\\10.0.22621.0\\ucrt" ^
+ -internal-isystem "D:\\Windows Kits\\10\\\\include\\10.0.22621.0\\\\um" ^
+ -internal-isystem "D:\\Windows Kits\\10\\\\include\\10.0.22621.0\\\\shared" ^
+ -internal-isystem "D:\\Windows Kits\\10\\\\include\\10.0.22621.0\\\\winrt" ^
+ -internal-isystem "D:\\Windows Kits\\10\\\\include\\10.0.22621.0\\\\cppwinrt" ^
+ -fdeprecated-macro "-fdebug-compilation-dir=D:\\Engineer\\forward-demo\\demo\\models\\simple" ^
+ -ferror-limit 19 -fmessage-length=120 -fno-use-cxa-atexit -fms-extensions ^
+ -fms-compatibility -fms-compatibility-version=19.37.32822 -std=c++14 ^
+ -fdelayed-template-parsing -fcxx-exceptions -fexceptions ^
+ -fcolor-diagnostics -triple=i686-pc-windows-msvc19.37.32822 -faddrsig ^
+ -target-feature +64bit-mode -flto=thin^
+ -mrelax-all ^
+ -o "D:\\Engineer\\forward-demo\\demo\\models\\simple\\MatmulAccelRuntime.asm" ^
+ -x c++ MatmulAccelRuntime.c
+
+clang -cc1as ^
+ -triple i686-pc-windows-msvc19.37.32822 ^
+ -filetype obj -main-file-name MatmulAccelRuntime.cpp ^
+ -target-feature +64bit-mode ^
+ -target-cpu x86-64 -I "D:\\Engineer\\forward-demo\\demo\\include" ^
+ "-fdebug-compilation-dir=D:\\Engineer\\forward-demo\\demo\\models\\simple" ^
+ -dwarf-version=4 -mrelocation-model static ^
+ -mrelax-all -mincremental-linker-compatible ^
+ -o "D:\Engineer\forward-demo\demo\models\simple\MatmulAccelRuntime.obj" ^
+ "D:\Engineer\forward-demo\demo\models\simple\MatmulAccelRuntime.asm"
+
+# link asm 
+link ^
+ -out:forward.exe -defaultlib:libcmt ^
+ -defaultlib:oldnames ^
+ "-libpath:D:\\Apps\\VisualStudio2023\\VS2023\\VC\\Tools\\Llvm\\lib\\clang\\16\\lib\\windows" ^
+ "-libpath:D:\\Engineer\\forward-demo\\demo\\models\\simple\\dll" ^
+ -nologo ^
+ "D:\\Engineer\\forward-demo\\demo\\models\\simple\\forward.obj" ^
+ "D:\\Engineer\\forward-demo\\demo\\models\\simple\\MatmulAccelRuntime.obj" 
+

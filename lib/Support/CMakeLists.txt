@@ -1,13 +1,13 @@
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Wall -Werror -Wno-pedantic -fno-strict-aliasing -Wno-maybe-uninitialized")
 # file(GLOB _sources *.cpp Dnnl/*.cpp Helper/*.cpp)
+file(GLOB _sources *.cpp Dnnl/*.cpp CaliMath/*.cpp)
 
 add_llvm_library(FORWARDMLIRSupport
-  MathUtils.cpp
-  ModuleInterpreter.cpp
-  Module.cpp
-  Float16.cpp
-  tosa_ext/tosa_const.cpp
-  tosa_ext/tosa_transpose.cpp
+  #MathUtils.cpp
+  #ModuleInterpreter.cpp
+  #Module.cpp
+  #Float16.cpp
+  ${_sources}
 
   DEPENDS
   ModuleAttrGen
@@ -22,7 +22,7 @@ add_llvm_library(FORWARDMLIRSupport
   MLIRQuantUtils
   MLIRInferenceInterface
   cnpy
-  # dnnl
+  dnnl
   # z
 )
 

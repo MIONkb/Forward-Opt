@@ -24,6 +24,7 @@ namespace FORWARD {
 
 std::unique_ptr<mlir::OperationPass<ModuleOp>> createImportCalibrationTablePass();
 std::unique_ptr<mlir::OperationPass<ModuleOp>> createTransformToQuantizedPass();
+std::unique_ptr<mlir::OperationPass<ModuleOp>> createMatmulToFunc();
 } // namespace FORWARD
 
 #define GEN_PASS_REGISTRATION

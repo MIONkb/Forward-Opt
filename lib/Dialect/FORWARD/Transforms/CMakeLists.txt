@@ -1,6 +1,7 @@
 add_mlir_dialect_library(MLIRFORWARDTransforms
   ImportCalibration.cpp
   TransformToQuantized.cpp
+  MatmulToFunc.cpp
 
 
   ADDITIONAL_HEADER_DIRS

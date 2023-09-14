@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.13.4)
-project(forward-opt LANGUAGES CXX C)
+project(forward-opt-cpp LANGUAGES CXX C)
 
 set(CMAKE_BUILD_WITH_INSTALL_NAME_DIR ON)
 
@@ -32,8 +32,8 @@ endif()
 
 # set(LLVM_INCLUDE_DIRS "/home/jhlou/LLVM17/llvm-project/build/include")
 # set(LLVM_LIBRARY_DIRS "/home/jhlou/LLVM17/llvm-project/build/lib")
-set(LLVM_INCLUDE_DIRS "/home/jhlou/LLVM17/llvm-project-4553dc46a05ec6f1e2aebcde1ce185772a26780b/build/include")
-set(LLVM_LIBRARY_DIRS "/home/jhlou/LLVM17/llvm-project-4553dc46a05ec6f1e2aebcde1ce185772a26780b/build/lib")
+set(LLVM_INCLUDE_DIRS "/home/xcgao/tools/llvm-18/build/include")
+set(LLVM_LIBRARY_DIRS "/home/xcgao/tools/llvm-18/build/lib")
 
 link_directories(${LLVM_LIBRARY_DIRS})
 include_directories(${LLVM_INCLUDE_DIRS})
@@ -65,11 +65,20 @@ ENDIF()
 #   message(STATUS "SODA-OPT Python bindings are disabled.")
 # endif()
 
+#-------------------------------------------------------------------------------
+# oneDNN Configuration
+#-------------------------------------------------------------------------------
+set(DNNL_PATH ${PROJECT_SOURCE_DIR}/third_party/oneDNN)
+set(DNNL_DIR ${DNNL_PATH}/lib/cmake/dnnl)
+find_package(DNNL REQUIRED CONFIG)
+include_directories(${DNNL_PATH}/include)
+link_directories(${DNNL_PATH}/lib)
+
 add_subdirectory(include/FORWARD)
 add_subdirectory(lib)
 add_subdirectory(tools)
-add_subdirectory(python)
-add_subdirectory(bindings)
+# add_subdirectory(python)
+# add_subdirectory(bindings)
 add_subdirectory(third_party)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -Werror -Wno-unused-result -Wreturn-type -Wunused-variable -fexceptions")
